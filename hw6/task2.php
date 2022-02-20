@@ -1,325 +1,121 @@
 <?php
 
-namespace RefactoringGuru\Strategy\RealWorld;
+class Context {
+    private $paymentMethod;
 
-/**
- * Это роутер и контроллер нашего приложения. Получив запрос, этот класс решает,
- * какое поведение должно выполняться. Когда приложение получает требование об
- * оплате, класс OrderController также решает, какой способ оплаты следует
- * использовать для его обработки. Таким образом, этот класс действует как
- * Контекст и в то же время как Клиент.
- */
-class OrderController
-{
-    /**
-     * Обрабатываем запросы POST.
-     *
-     * @param $url
-     * @param $data
-     * @throws \Exception
-     */
-    public function post(string $url, array $data)
+    public function __construct(PaymentMethod $paymentMethod)
     {
-        echo "Controller: POST request to $url with " . json_encode($data) . "\n";
-
-        $path = parse_url($url, PHP_URL_PATH);
-
-        if (preg_match('#^/orders?$#', $path, $matches)) {
-            $this->postNewOrder($data);
-        } else {
-            echo "Controller: 404 page\n";
-        }
+        $this->paymentMethod = $paymentMethod;
     }
 
-    /**
-     * Обрабатываем запросы GET.
-     *
-     * @param $url
-     * @throws \Exception
-     */
-    public function get(string $url): void
+    public function setStrategy(PaymentMethod $paymentMethod)
     {
-        echo "Controller: GET request to $url\n";
-
-        $path = parse_url($url, PHP_URL_PATH);
-        $query = parse_url($url, PHP_URL_QUERY);
-        parse_str($query, $data);
-
-        if (preg_match('#^/orders?$#', $path, $matches)) {
-            $this->getAllOrders();
-        } elseif (preg_match('#^/order/([0-9]+?)/payment/([a-z]+?)(/return)?$#', $path, $matches)) {
-            $order = Order::get($matches[1]);
-
-            // Способ оплаты (стратегия) выбирается в соответствии со значением,
-            // переданным в запросе.
-            $paymentMethod = PaymentFactory::getPaymentMethod($matches[2]);
-
-            if (!isset($matches[3])) {
-                $this->getPayment($paymentMethod, $order, $data);
-            } else {
-                $this->getPaymentReturn($paymentMethod, $order, $data);
-            }
-        } else {
-            echo "Controller: 404 page\n";
-        }
+        $this->paymentMethod = $paymentMethod;
     }
 
-    /**
-     * POST /order {data}
-     */
-    public function postNewOrder(array $data): void
-    {
-        $order = new Order($data);
-        echo "Controller: Created the order #{$order->id}.\n";
-    }
-
-    /**
-     * GET /orders
-     */
-    public function getAllOrders(): void
-    {
-        echo "Controller: Here's all orders:\n";
-        foreach (Order::get() as $order) {
-            echo json_encode($order, JSON_PRETTY_PRINT) . "\n";
-        }
-    }
-
-    /**
-     * GET /order/123/payment/XX
-     */
-    public function getPayment(PaymentMethod $method, Order $order, array $data): void
-    {
-        // Фактическая работа делегируется объекту метода оплаты.
-        $form = $method->getPaymentForm($order);
-        echo "Controller: here's the payment form:\n";
-        echo $form . "\n";
-    }
-
-    /**
-     * GET /order/123/payment/XXX/return?key=AJHKSJHJ3423&success=true
-     */
-    public function getPaymentReturn(PaymentMethod $method, Order $order, array $data): void
-    {
-        try {
-            // Другой тип работы, делегированный методу оплаты.
-            if ($method->validateReturn($order, $data)) {
-                echo "Controller: Thanks for your order!\n";
-                $order->complete();
-            }
-        } catch (\Exception $e) {
-            echo "Controller: got an exception (" . $e->getMessage() . ")\n";
+    public function payForOrder(User $user, Order $order) {
+        echo "User ".$user->getName()." is ready to pay for his order<br>";
+        $paymentReturn = $this->paymentMethod->makePayment($order->getTotalSum());
+        if ($this->paymentMethod->validateReturn($paymentReturn)) {
+            echo "Order for ".$user->getName()." is succefully paid and will be delivered shortly<br>";
         }
     }
 }
 
-/**
- * Упрощенное представление класса Заказа.
- */
-class Order
-{
-    /**
-     * Для простоты, мы будем хранить все созданные заказы здесь...
-     */
-    private static $orders = [];
+class User {
+    protected $name;
+    protected $phone;
 
-    /**
-     * ...и получать к ним доступ отсюда.
-     *
-     * @param int $orderId
-     * @return mixed
-     */
-    public static function get(int $orderId = null)
-    {
-        if ($orderId === null) {
-            return static::$orders;
-        } else {
-            return static::$orders[$orderId];
-        }
+    public function __construct($name, $phone) {
+        $this->name = $name;
+        $this->phone = $phone;
     }
 
-    /**
-     * Конструктор Заказа присваивает значения полям заказа. Чтобы всё было
-     * просто, нет никакой проверки.
-     *
-     * @param array $attributes
-     */
-    public function __construct(array $attributes)
-    {
-        $this->id = count(static::$orders);
-        $this->status = "new";
-        foreach ($attributes as $key => $value) {
-            $this->{$key} = $value;
-        }
-        static::$orders[$this->id] = $this;
+    public function getPhone() {
+        return $this->phone;
     }
 
-    /**
-     * Метод позвонить при оплате заказа.
-     */
-    public function complete(): void
-    {
-        $this->status = "completed";
-        echo "Order: #{$this->id} is now {$this->status}.";
+    public function getName() {
+        return $this->name;
     }
 }
 
-/**
- * Этот класс помогает создать правильный объект стратегии для обработки
- * платежа.
- */
-class PaymentFactory
-{
-    /**
-     * Получаем способ оплаты по его ID.
-     *
-     * @param $id
-     * @return PaymentMethod
-     * @throws \Exception
-     */
-    public static function getPaymentMethod(string $id): PaymentMethod
-    {
-        switch ($id) {
-            case "cc":
-                return new CreditCardPayment();
-            case "paypal":
-                return new PayPalPayment();
-            default:
-                throw new \Exception("Unknown Payment Method");
-        }
+class Order {
+    protected $totalSum;
+
+    public function __construct($totalSum){
+        $this->totalSum = $totalSum;
+    }
+
+    public function getTotalSum(){
+        return $this->totalSum;
     }
 }
 
-/**
- * Интерфейс Стратегии описывает, как клиент может использовать различные
- * Конкретные Стратегии.
- *
- * Обратите внимание, что в большинстве примеров, которые можно найти в
- * интернете, стратегии чаще всего делают какую-нибудь мелочь в рамках одного
- * метода.
- */
 interface PaymentMethod
 {
-    public function getPaymentForm(Order $order): string;
+    public function makePayment(float $amount): bool;
 
-    public function validateReturn(Order $order, array $data): bool;
+    public function validateReturn(bool $paymentMethodReturn): bool;
 }
 
-/**
- * Эта Конкретная Стратегия предоставляет форму оплаты и проверяет результаты
- * платежей кредитными картам.
- */
-class CreditCardPayment implements PaymentMethod
-{
-    static private $store_secret_key = "swordfish";
+class QiwiPayment implements PaymentMethod {
 
-    public function getPaymentForm(Order $order): string
-    {
-        $returnURL = "https://our-website.com/" .
-            "order/{$order->id}/payment/cc/return";
-
-        return <<<FORM
-<form action="https://my-credit-card-processor.com/charge" method="POST">
-    <input type="hidden" id="email" value="{$order->email}">
-    <input type="hidden" id="total" value="{$order->total}">
-    <input type="hidden" id="returnURL" value="$returnURL">
-    <input type="text" id="cardholder-name">
-    <input type="text" id="credit-card">
-    <input type="text" id="expiration-date">
-    <input type="text" id="ccv-number">
-    <input type="submit" value="Pay">
-</form>
-FORM;
-    }
-
-    public function validateReturn(Order $order, array $data): bool
-    {
-        echo "CreditCardPayment: ...validating... ";
-
-        if ($data['key'] != md5($order->id . static::$store_secret_key)) {
-            throw new \Exception("Payment key is wrong.");
-        }
-
-        if (!isset($data['success']) || !$data['success'] || $data['success'] == 'false') {
-            throw new \Exception("Payment failed.");
-        }
-
-        // ...
-
-        if (floatval($data['total']) < $order->total) {
-            throw new \Exception("Payment amount is wrong.");
-        }
-
-        echo "Done!\n";
-
+    public function makePayment(float $amount): bool{
+        echo "Paying $amount by QIWI...<br>";
         return true;
     }
+
+    public function validateReturn(bool $paymentMethodReturn): bool {
+        if ($paymentMethodReturn) {
+            echo "Payment by QIWI successful!<br>";
+            return true;
+        }else return false;
+    }
 }
 
-/**
- * Эта Конкретная Стратегия предоставляет форму оплаты и проверяет результаты
- * платежей PayPal.
- */
-class PayPalPayment implements PaymentMethod
-{
-    public function getPaymentForm(Order $order): string
-    {
-        $returnURL = "https://our-website.com/" .
-            "order/{$order->id}/payment/paypal/return";
+class YandexPayment implements PaymentMethod {
 
-        return <<<FORM
-<form action="https://paypal.com/payment" method="POST">
-    <input type="hidden" id="email" value="{$order->email}">
-    <input type="hidden" id="total" value="{$order->total}">
-    <input type="hidden" id="returnURL" value="$returnURL">
-    <input type="submit" value="Pay on PayPal">
-</form>
-FORM;
-    }
-
-    public function validateReturn(Order $order, array $data): bool
-    {
-        echo "PayPalPayment: ...validating... ";
-
-        // ...
-
-        echo "Done!\n";
-
+    public function makePayment(float $amount): bool{
+        echo "Paying $amount by Yandex...<br>";
         return true;
     }
+
+    public function validateReturn(bool $paymentMethodReturn): bool {
+        if ($paymentMethodReturn) {
+            echo "Payment by Yandex successful!<br>";
+            return true;
+        }else return false;
+    }
 }
 
-/**
- * Клиентский код.
- */
+class WebmoneyPayment implements PaymentMethod {
 
-$controller = new OrderController();
+    public function makePayment(float $amount): bool{
+        echo "Paying $amount by Webmoney...<br>";
+        return true;
+    }
 
-echo "Client: Let's create some orders\n";
+    public function validateReturn(bool $paymentMethodReturn): bool {
+        if ($paymentMethodReturn) {
+            echo "Payment by Webmoney successful!<br>";
+            return true;
+        }else return false;
+    }
+}
 
-$controller->post("/orders", [
-    "email" => "me@example.com",
-    "product" => "ABC Cat food (XL)",
-    "total" => 9.95,
-]);
-
-$controller->post("/orders", [
-    "email" => "me@example.com",
-    "product" => "XYZ Cat litter (XXL)",
-    "total" => 19.95,
-]);
-
-echo "\nClient: List my orders, please\n";
-
-$controller->get("/orders");
-
-echo "\nClient: I'd like to pay for the second, show me the payment form\n";
-
-$controller->get("/order/1/payment/paypal");
-
-echo "\nClient: ...pushes the Pay button...\n";
-echo "\nClient: Oh, I'm redirected to the PayPal.\n";
-echo "\nClient: ...pays on the PayPal...\n";
-echo "\nClient: Alright, I'm back with you, guys.\n";
-
-$controller->get("/order/1/payment/paypal/return" .
-    "?key=c55a3964833a4b0fa4469ea94a057152&success=true&total=19.95");
+$customer1 = new User("Leonard Hofstadter", "+11234567890");
+$order1 = new Order(10000);
+$customer2 = new User("Rajesh Koothrappali", "+11357902468");
+$order2 = new Order(20000);
+$customer3 = new User("Sheldon Cooper", "+11246803579");
+$order3 = new Order(30000);
+$paymentMethod1 = new QiwiPayment;
+$context1 = new Context($paymentMethod1);
+$context1->payForOrder($customer1, $order1);
+$paymentMethod2 = new YandexPayment;
+$context1->setStrategy($paymentMethod2);
+$context1->payForOrder($customer2, $order2);
+$paymentMethod3 = new WebmoneyPayment;
+$context1->setStrategy($paymentMethod3);
+$context1->payForOrder($customer3, $order3);
