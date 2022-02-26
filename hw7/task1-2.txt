@@ -1,0 +1,47 @@
+1. Найти и указать в проекте Front Controller и расписать классы, которые с ним взаимодействуют.
+
+Файл по пути \app\kernel.php.
+Функция process:
+/**
+     * @param Request $request
+     * @return Response
+     */
+    protected function process(Request $request): Response
+    {
+        $matcher = new UrlMatcher($this->routeCollection, new RequestContext());
+        $matcher->getContext()->fromRequest($request);
+
+        try {
+            $request->attributes->add($matcher->match($request->getPathInfo()));
+            $request->setSession(new Session());
+
+            $controller = (new ControllerResolver())->getController($request);
+            $arguments = (new ArgumentResolver())->getArguments($request, $controller);
+
+            return call_user_func_array($controller, $arguments);
+        } catch (ResourceNotFoundException $e) {
+            return new Response('Page not found. 404', Response::HTTP_NOT_FOUND);
+        } catch (\Throwable $e) {
+            $error = 'Server error occurred. 500';
+            if (Registry::getDataConfig('environment') === 'dev') {
+                $error .= '<pre>' . $e->getTraceAsString() . '</pre>';
+            }
+
+            return new Response($error, Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    Здесь выбор нужного контроллера идет при инициализации переменных $controller и $arguments, а потом через call_user_func_array вызывается уже конкретный контроллер.
+    По поводу взаимодействия классов вопрос не совсем понятен. Данный контроллер обращается к куче разных классов из Symphony, берет настройки из класса Registry и вызывает MainController либо OrderController либо UserController либо ProductController  в зависимости от данных в $request.
+
+    2. Найти в проекте паттерн Registry и объяснить, почему он был применён.
+
+    По пути app\framework\Registry.php
+
+    Он больше похож не на тот Registry, что описан в методичке, а на тот, что Вы описывали на уроке, сделан через dependancy injection и symphony. А хранится в нем коллекция маршрутов и она отдается по запросу.
+    Применён скорее всего потому, что маршруты едины для всего приложения и логично держать их в реестре.
+
+    3. Добавить во все классы Repository использование паттерна Identity Map вместо постоянного генерирования сущностей.
+
+    Я код добавил, как счел правильным, но не уверен, что везде корректен синтаксис. Потому что запустить проект я так и не смог, чтобы проверить. Главная страница грузится, а потом что-то не так как раз с маршрутами, остальные страницы не открываются.
+    В папках Entity и Repository добавлено по файлу и немного изменен код остальных файлов в этих папках.
